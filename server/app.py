@@ -1,106 +1,192 @@
-from typing import TypedDict, Annotated, Optional # Using for defining the state of our agent graph
+from typing import TypedDict, Annotated, Optional
 from langgraph.graph import add_messages, StateGraph, END
-from langchain_google_genai import ChatGoogleGenerativeAI
-# from langchain_openai import ChatOpenAI
-from langchain.tools import Tool
+from langchain.tools import Tool, tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.checkpoint.memory import MemorySaver
+from fastapi import FastAPI, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel
 from uuid import uuid4
 from dotenv import load_dotenv
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+import datetime
 import json
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 load_dotenv()
 
-# LangChain-compatible Gemini model
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.7)
+# Gemini LLM
+llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash", temperature=0.7, model_kwargs={"streaming": True}
+)
 
-from pydantic import BaseModel
 
-def search_web(query: str):
-    search_results = TavilySearchResults(max_results=2).invoke({"query": query})
-
-    if not search_results:
-        return "No relevant search results found."
-
-    return search_results
-
+# --- Tool Definitions ---
 class SearchToolSchema(BaseModel):
     query: str
 
+
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+def search_web(query: str):
+    return TavilySearchResults(max_results=2).invoke({"query": query})
+
+
 search_tool = Tool.from_function(
     func=search_web,
-    name="tavily_Search",
-    description="Retrieve real-time information like weather, news, or current events using web search.",
-    args_schema= SearchToolSchema
-) # Find only given number of result
+    name="realtime_web_search",
+    description="Use this to fetch live information (like current events, weather, news, launch dates) from the web.",
+    args_schema=SearchToolSchema,
+)
 
-tools = [search_tool] # storing search tool in general tool array
 
-memory = MemorySaver()
+@tool
+def get_system_time(format: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """Returns the current system time in the specified format."""
+    return datetime.datetime.now().strftime(format)
 
+
+@tool
+def calculate_days_between(input: str) -> str:
+    """Calculate number of days between 'YYYY-MM-DD to YYYY-MM-DD'."""
+    try:
+        parts = input.strip().replace('"', "").replace("'", "").split(" to ")
+        if len(parts) != 2:
+            return "Invalid format. Use: 'YYYY-MM-DD to YYYY-MM-DD'"
+        start = datetime.datetime.strptime(parts[0].strip(), "%Y-%m-%d")
+        end = datetime.datetime.strptime(parts[1].strip(), "%Y-%m-%d")
+        return str((end - start).days) + " days"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+tools = [search_tool, get_system_time, calculate_days_between]
 llm_with_tools = llm.bind_tools(tools=tools)
 
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
+# LangGraph setup
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
+
+memory = MemorySaver()
+
+
 async def model(state: State):
-    result = await llm_with_tools.ainvoke(state["messages"])
-    return{
-        "messages": [result],
-    }
+    messages = state["messages"][-12:]  # Keep only last 12 for context
+    async for chunk in llm_with_tools.astream(messages):
+        if isinstance(chunk, AIMessageChunk):
+            yield {"messages": messages + [chunk]}
+
 
 async def tools_router(state: State):
-    last_message = state["messages"][-1]
+    last_msg = state["messages"][-1]
+    return "tool_node" if getattr(last_msg, "tool_calls", []) else "end"
 
-    if(hasattr(last_message, "tool_calls") and last_message.tool_calls):
-        return "tool_node"
-    else:
-        return "model_end"
-    
-async def tool_node(state):
-    """Custom tool node that handles tool calls from the LLM."""
-    # Get the tool calls from the last message
+
+async def tool_node(state: State):
     tool_calls = state["messages"][-1].tool_calls
-
-    # Initialize list to store tool messages
     tool_messages = []
 
-    # Process each tool call
-    for tool_call in tool_calls:
-        tool_name = tool_call["name"]
-        tool_args = tool_call["args"]
-        tool_id = tool_call["id"]
-        
-        # Handle the search tool
-        if tool_name == "tavily_Search":
-            search_query = tool_args.get("query", None) or state["messages"][-1].content
-            # Execute the search tool with the provided arguments
-            search_results = await search_tool.ainvoke(search_query)
-
-            # Create a ToolMessage for this result
-            tool_message = ToolMessage(
-                content = str(search_results),
-                tool_call_id=tool_id,
-                name = tool_name
-            )
-
-            tool_messages.append(tool_message)
-
-    # Add the tool messages to the state
+    for call in tool_calls:
+        tool_name, tool_args, tool_id = call["name"], call["args"], call["id"]
+        for tool in tools:
+            if tool.name == tool_name:
+                try:
+                    output = tool.invoke(tool_args)
+                    tool_messages.append(
+                        ToolMessage(content=str(output), tool_call_id=tool_id)
+                    )
+                except Exception as e:
+                    tool_messages.append(
+                        ToolMessage(
+                            content=f"Tool error: {str(e)}", tool_call_id=tool_id
+                        )
+                    )
     return {"messages": state["messages"] + tool_messages}
 
-graph_builder = StateGraph(State)
 
+graph_builder = StateGraph(State)
 graph_builder.add_node("model", model)
 graph_builder.add_node("tool_node", tool_node)
 graph_builder.set_entry_point("model")
-graph_builder.add_node("model_end", lambda state: {"messages": state["messages"]})
-
-graph_builder.add_conditional_edges("model", tools_router, {"tool_node": "tool_node", "model_end": END})
 graph_builder.add_edge("tool_node", "model")
-
+graph_builder.add_conditional_edges(
+    "model", tools_router, {"tool_node": "tool_node", "end": END}
+)
 graph = graph_builder.compile(checkpointer=memory)
-graph_instance = graph
+
+# --- FastAPI App with Rate Limiting ---
+limiter = Limiter(key_func=get_remote_address)
+
+app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def serialize_chunk(chunk):
+    return chunk.content if isinstance(chunk, AIMessageChunk) else str(chunk)
+
+
+@limiter.limit("5/minute")
+@app.get("/chat_stream/{message}")
+async def chat_stream(request: Request, message: str, checkpoint_id: Optional[str] = Query(None)):
+    async def event_stream():
+        is_new = checkpoint_id is None
+        thread_id = str(uuid4()) if is_new else checkpoint_id
+
+        if is_new:
+            yield f'data: {{"type": "checkpoint", "checkpoint_id": "{thread_id}"}}\n\n'
+
+        config = {"configurable": {"thread_id": thread_id}}
+        events = graph.astream_events(
+            {"messages": [HumanMessage(content=message)]}, version="v2", config=config
+        )
+
+        async for event in events:
+            etype = event["event"]
+
+            if etype == "on_chat_model_stream":
+                chunk = (
+                    event["data"]["chunk"]
+                    .content.replace("\n", "\\n")
+                    .replace('"', '\\"')
+                )
+                for word in chunk.split(" "):
+                    yield f'data: {{"type": "content", "content": "{word} "}}\n\n'
+
+            elif etype == "on_chat_model_end":
+                tool_calls = getattr(event["data"]["output"], "tool_calls", [])
+                for call in tool_calls:
+                    if call["name"] == "search":
+                        query = call["args"].get("query", "")
+                        safe = (
+                            query.replace('"', '\\"')
+                            .replace("'", "\\'")
+                            .replace("\n", "\\n")
+                        )
+                        yield f'data: {{"type": "search_start", "query": "{safe}"}}\n\n'
+
+            elif etype == "on_tool_end" and event["name"] == "search":
+                output = event["data"]["output"]
+                if isinstance(output, list):
+                    urls = [
+                        i["url"] for i in output if isinstance(i, dict) and "url" in i
+                    ]
+                    yield f'data: {{"type": "search_results", "urls": {json.dumps(urls)} }}\n\n'
+
+        yield f'data: {{"type": "end"}}\n\n'
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
