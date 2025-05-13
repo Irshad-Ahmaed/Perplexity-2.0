@@ -3,11 +3,11 @@ name: FastAPI CI
 on:
   push:
     paths:
-      - 'server/**/*.py'
+      - 'server/*.py'
       - '.github/workflows/**'
   pull_request:
     paths:
-      - 'server/**/*.py'
+      - 'server/*.py'
       - '.github/workflows/**'
 
 jobs:
