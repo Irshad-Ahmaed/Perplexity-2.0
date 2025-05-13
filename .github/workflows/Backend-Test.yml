@@ -1,0 +1,47 @@
+name: FastAPI CI
+
+on:
+  push:
+    paths:
+      - 'server/**.py'
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - 'server/**.py'
+      - '.github/workflows/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint with flake8
+        run: |
+          source venv/bin/activate
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Run FastAPI app (basic test)
+        run: |
+          source venv/bin/activate
+          uvicorn app:app --host 127.0.0.1 --port 8000 &
+          sleep 5
+          curl -f http://127.0.0.1:8000 || exit 1
