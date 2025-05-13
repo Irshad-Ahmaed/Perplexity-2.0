@@ -1,5 +1,6 @@
 name: FastAPI CI
 
+
 on:
   push:
     paths:
