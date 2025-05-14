@@ -133,6 +133,9 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
+@app.get("/")
+def read_root():
+    return {"status": "ok"}
 
 # Utility
 def safe(text: str):
