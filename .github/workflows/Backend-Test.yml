@@ -1,12 +1,7 @@
 name: FastAPI CI
 
-
 on:
   push:
-    paths:
-      - 'server/*.py'
-      - '.github/workflows/**'
-  pull_request:
     paths:
       - 'server/*.py'
       - '.github/workflows/**'
@@ -34,6 +29,9 @@ jobs:
 
       - name: Run FastAPI app (basic test)
         working-directory: server
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
         run: |
           source venv/bin/activate
           uvicorn app:app --host 127.0.0.1 --port 8000 &
