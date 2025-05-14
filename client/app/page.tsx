@@ -73,7 +73,7 @@ const Home = () => {
         ]);
 
         // Create URL with checkpoint ID if it exists
-        let url = `${process.env.BACKEND_API_KEY}/chat_stream/${encodeURIComponent(userInput)}`;
+        let url = `${process.env.NEXT_PUBLIC_BACKEND_API_KEY}/chat_stream/${encodeURIComponent(userInput)}`;
         if (checkpointId) {
           url += `?checkpoint_id=${encodeURIComponent(checkpointId)}`;
         }
