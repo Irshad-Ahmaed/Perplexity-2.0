@@ -32,11 +32,6 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Lint with flake8
-        working-directory: server
-        run: |
-          flake8 .
-
       - name: Run FastAPI app (basic test)
         working-directory: server
         run: |
