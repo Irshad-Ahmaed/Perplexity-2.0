@@ -73,7 +73,7 @@ const Home = () => {
         ]);
 
         // Create URL with checkpoint ID if it exists
-        let url = `https://perplexity-api.onrender.com/chat_stream/${encodeURIComponent(userInput)}`;
+        let url = `${process.env.BACKEND_API_KEY}/chat_stream/${encodeURIComponent(userInput)}`;
         if (checkpointId) {
           url += `?checkpoint_id=${encodeURIComponent(checkpointId)}`;
         }
