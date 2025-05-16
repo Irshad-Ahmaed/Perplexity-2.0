@@ -44,7 +44,7 @@ const InputBar: React.FC<InputBarProps> = ({
   }, [showEmojiPicker]);
 
   return (
-    <form onSubmit={onSubmit} className="p-4 bg-white relative">
+    <form onSubmit={onSubmit} className="p-2 md:p-4 bg-white relative">
       <div className="flex items-center bg-[#F9F9F5] rounded-full p-2 md:p-3 shadow-md border border-gray-200">
         <button
           type="button"
@@ -64,7 +64,7 @@ const InputBar: React.FC<InputBarProps> = ({
 
         <button
           type="submit"
-          className="bg-gradient-to-r from-teal-500 to-teal-400 hover:from-teal-600 hover:to-teal-500 rounded-full p-3 ml-2 shadow-md transition-all duration-200 group"
+          className="bg-gradient-to-r from-teal-500 to-teal-400 hover:from-teal-600 hover:to-teal-500 rounded-full p-2 md:p-3 md:ml-2 shadow-md transition-all duration-200 group"
         >
           <svg
             className="size-4 md:size-6 text-white transform rotate-45 group-hover:scale-110 transition-transform duration-200"
