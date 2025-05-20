@@ -21,7 +21,7 @@ export interface Message {
   searchInfo?: SearchInfo;
 }
 
-const BACKEND_API_KEY = process.env.NEXT_PUBLIC_ENV == 'development' ? 'http://localhost:8000' : process.env.NEXT_PUBLIC_BACKEND_API_KEY
+const BACKEND_API_KEY = process.env.NEXT_PUBLIC_ENV == 'development' ? 'http://127.0.0.1:8000' : process.env.NEXT_PUBLIC_BACKEND_API_KEY
 
 const Home = () => {
   const [messages, setMessages] = useState<Message[]>([

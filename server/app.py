@@ -49,6 +49,34 @@ search_tool = Tool.from_function(
     args_schema=SearchToolSchema,
 )
 
+import wikipedia
+
+@tool
+def run_python_code(code: str) -> str:
+    """
+    Executes a simple Python code snippet. 
+    Returns the result or an error message.
+    """
+    try:
+        local_vars = {}
+        exec(code, {}, local_vars)
+        return str(local_vars) if local_vars else "Code executed, no output."
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@tool
+def search_wikipedia(query: str) -> str:
+    """
+    Searches Wikipedia for a summary of the given query.
+    Returns the first paragraph of the article or an error message.
+    """
+    try:
+        summary = wikipedia.summary(query, sentences=2)
+        return summary
+    except Exception as e:
+        return f"Error: {e}"
+
 
 @tool
 def get_system_time(format: str = "%Y-%m-%d %H:%M:%S") -> str:
@@ -70,7 +98,14 @@ def calculate_days_between(input: str) -> str:
         return f"Error: {e}"
 
 
-tools = [search_tool, get_system_time, calculate_days_between]
+tools = [
+    search_tool,
+    get_system_time,
+    calculate_days_between,
+    run_python_code,
+    search_wikipedia,
+]
+
 llm_with_tools = llm.bind_tools(tools)
 
 # Memory
